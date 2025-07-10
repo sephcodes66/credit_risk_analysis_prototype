@@ -1,103 +1,101 @@
+"""
+This module handles loading and processing the historical German Credit Data.
+"""
+import os
 import pandas as pd
 
-def get_column_names():
-    """Returns the column names for the german credit dataset."""
-    return [
-        'status_of_existing_checking_account',
-        'duration_in_month',
-        'credit_history',
-        'purpose',
-        'credit_amount',
-        'savings_account_bonds',
-        'present_employment_since',
-        'installment_rate_in_percentage_of_disposable_income',
-        'personal_status_and_sex',
-        'other_debtors_guarantors',
-        'present_residence_since',
-        'property',
-        'age_in_years',
-        'other_installment_plans',
-        'housing',
-        'number_of_existing_credits_at_this_bank',
-        'job',
-        'number_of_people_being_liable_to_provide_maintenance_for',
-        'telephone',
-        'foreign_worker',
-        'risk'
+# Define the path to the data file
+DATA_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'german.data')
+
+# Define the column names as per the dataset documentation
+COLUMN_NAMES = [
+    'checking_account_status', 'duration_months', 'credit_history', 'purpose',
+    'credit_amount', 'savings_account', 'employment_duration', 'installment_rate',
+    'personal_status_sex', 'other_debtors', 'present_residence_since', 'property',
+    'age_years', 'other_installment_plans', 'housing', 'existing_credits', 'job',
+    'dependents', 'telephone', 'foreign_worker', 'risk'
+]
+
+# Define the mapping for categorical variables from codes to human-readable text
+# Based on the dataset documentation from UCI Machine Learning Repository
+DECODING_MAP = {
+    'checking_account_status': {'A11': '< 0 DM', 'A12': '0 - 200 DM', 'A13': '>= 200 DM', 'A14': 'No Account'},
+    'credit_history': {'A30': 'No Credits/All Paid', 'A31': 'All Credits Paid', 'A32': 'Existing Credits Paid', 'A33': 'Past Delay', 'A34': 'Critical Account'},
+    'purpose': {'A40': 'Car (New)', 'A41': 'Car (Used)', 'A42': 'Furniture/Equipment', 'A43': 'Radio/TV', 'A44': 'Appliances', 'A45': 'Repairs', 'A46': 'Education', 'A48': 'Retraining', 'A49': 'Business', 'A410': 'Other'},
+    'savings_account': {'A61': '< 100 DM', 'A62': '100 - 500 DM', 'A63': '500 - 1000 DM', 'A64': '>= 1000 DM', 'A65': 'Unknown/No Savings'},
+    'employment_duration': {'A71': 'Unemployed', 'A72': '< 1 Year', 'A73': '1 - 4 Years', 'A74': '4 - 7 Years', 'A75': '>= 7 Years'},
+    'personal_status_sex': {'A91': 'Male: Divorced', 'A92': 'Female: Divorced/Married', 'A93': 'Male: Single', 'A94': 'Male: Married/Widowed', 'A95': 'Female: Single'},
+    'other_debtors': {'A101': 'None', 'A102': 'Co-applicant', 'A103': 'Guarantor'},
+    'property': {'A121': 'Real Estate', 'A122': 'Savings Agreement/Insurance', 'A123': 'Car or Other', 'A124': 'No Property'},
+    'other_installment_plans': {'A141': 'Bank', 'A142': 'Stores', 'A143': 'None'},
+    'housing': {'A151': 'Rent', 'A152': 'Own', 'A153': 'For Free'},
+    'job': {'A171': 'Unemployed/Unskilled NR', 'A172': 'Unskilled Resident', 'A173': 'Skilled', 'A174': 'Management/Self-employed'},
+    'telephone': {'A191': 'None', 'A192': 'Yes'},
+    'foreign_worker': {'A201': 'Yes', 'A202': 'No'},
+    'risk': {1: 'Good', 2: 'Bad'}
+}
+
+def load_and_clean_data():
+    """
+    Loads the raw german.data file, assigns column names, and decodes
+    the categorical variables into a clean, human-readable DataFrame.
+
+    Returns:
+        pandas.DataFrame: The cleaned and decoded dataset.
+    """
+    # Load the data, specifying no header and space as the delimiter
+    df = pd.read_csv(DATA_PATH, header=None, sep=r'\s+')
+    df.columns = COLUMN_NAMES
+
+    # Apply the decoding map to each relevant column
+    for col, mapping in DECODING_MAP.items():
+        df[col] = df[col].map(mapping)
+
+    return df
+
+def get_peer_group_analysis(df, age, housing, job):
+    """
+    Filters the historical data to find a peer group and calculates key metrics.
+
+    Args:
+        df (pandas.DataFrame): The cleaned historical data.
+        age (int): The applicant's age.
+        housing (str): The applicant's housing status ('Own', 'Rent', 'For Free').
+        job (str): The applicant's job type ('Skilled', 'Unskilled', 'Management').
+
+    Returns:
+        dict: A dictionary containing the peer group's historical default rate
+              and a breakdown of their loan purposes. Returns None if no peers found.
+    """
+    # Create an age bracket for more effective filtering
+    age_bracket_min = age - 5
+    age_bracket_max = age + 5
+
+    # Map the app's simple job titles to the more detailed ones in the data
+    job_mapping = {
+        'Skilled': 'Skilled',
+        'Unskilled': 'Unskilled Resident',
+        'Management': 'Management/Self-employed'
+    }
+    mapped_job = job_mapping.get(job, 'Skilled') # Default to skilled if not found
+
+    # Filter the DataFrame to find the peer group
+    peer_group = df[
+        (df['age_years'] >= age_bracket_min) &
+        (df['age_years'] <= age_bracket_max) &
+        (df['housing'] == housing) &
+        (df['job'] == mapped_job)
     ]
 
-def read_data(file_path):
-    """Reads the german credit data from the specified path."""
-    df = pd.read_csv(file_path, sep=r'\s+', header=None, names=get_column_names())
-    return df
+    if peer_group.empty:
+        return None
 
-def transform_data(df):
-    """Decodes categorical features and standardizes the target variable."""
-    # A11: < 0 DM, A12: 0 <= ... < 200 DM, etc.
-    status_map = {'A11': '< 0 DM', 'A12': '0 <= ... < 200 DM', 'A13': '>= 200 DM / salary assignments for at least 1 year', 'A14': 'no checking account'}
-    df['status_of_existing_checking_account'] = df['status_of_existing_checking_account'].map(status_map)
+    # Calculate metrics
+    default_rate = (peer_group['risk'] == 'Bad').mean()
+    purpose_counts = peer_group['purpose'].value_counts()
 
-    # A30: no credits taken, A31: all credits at this bank paid back, etc.
-    credit_history_map = {'A30': 'no credits taken/ all credits paid back duly', 'A31': 'all credits at this bank paid back duly', 'A32': 'existing credits paid back duly till now', 'A33': 'delay in paying off in the past', 'A34': 'critical account/ other credits existing (not at this bank)'}
-    df['credit_history'] = df['credit_history'].map(credit_history_map)
-
-    # A40: car (new), A41: car (used), etc.
-    purpose_map = {'A40': 'car (new)', 'A41': 'car (used)', 'A42': 'furniture/equipment', 'A43': 'radio/television', 'A44': 'domestic appliances', 'A45': 'repairs', 'A46': 'education', 'A47': 'vacation', 'A48': 'retraining', 'A49': 'business', 'A410': 'others'}
-    df['purpose'] = df['purpose'].map(purpose_map)
-
-    # A61: < 100 DM, A62: 100 <= ... < 500 DM, etc.
-    savings_map = {'A61': '< 100 DM', 'A62': '100 <= ... < 500 DM', 'A63': '500 <= ... < 1000 DM', 'A64': '>= 1000 DM', 'A65': 'unknown/ no savings account'}
-    df['savings_account_bonds'] = df['savings_account_bonds'].map(savings_map)
-
-    # A71: unemployed, A72: < 1 year, etc.
-    employment_map = {'A71': 'unemployed', 'A72': '< 1 year', 'A73': '1 <= ... < 4 years', 'A74': '4 <= ... < 7 years', 'A75': '>= 7 years'}
-    df['present_employment_since'] = df['present_employment_since'].map(employment_map)
-
-    # A91: male : divorced/separated, A92: female : divorced/separated/married, etc.
-    personal_status_map = {'A91': 'male : divorced/separated', 'A92': 'female : divorced/separated/married', 'A93': 'male : single', 'A94': 'male : married/widowed', 'A95': 'female : single'}
-    df['personal_status_and_sex'] = df['personal_status_and_sex'].map(personal_status_map)
-
-    # A101: none, A102: co-applicant, etc.
-    other_debtors_map = {'A101': 'none', 'A102': 'co-applicant', 'A103': 'guarantor'}
-    df['other_debtors_guarantors'] = df['other_debtors_guarantors'].map(other_debtors_map)
-
-    # A121: real estate, A122: building society savings agreement/ life insurance, etc.
-    property_map = {'A121': 'real estate', 'A122': 'if not A121 : building society savings agreement/ life insurance', 'A123': 'if not A121/A122 : car or other, not in attribute 6', 'A124': 'unknown / no property'}
-    df['property'] = df['property'].map(property_map)
-
-    # A141: bank, A142: stores, etc.
-    other_installment_plans_map = {'A141': 'bank', 'A142': 'stores', 'A143': 'none'}
-    df['other_installment_plans'] = df['other_installment_plans'].map(other_installment_plans_map)
-
-    # A151: rent, A152: own, etc.
-    housing_map = {'A151': 'rent', 'A152': 'own', 'A153': 'for free'}
-    df['housing'] = df['housing'].map(housing_map)
-
-    # A171: unemployed/ unskilled, A172: unskilled - resident, etc.
-    job_map = {'A171': 'unemployed/ unskilled - non-resident', 'A172': 'unskilled - resident', 'A173': 'skilled employee / official', 'A174': 'management/ self-employed/ highly qualified employee/ officer'}
-    df['job'] = df['job'].map(job_map)
-
-    # A191: none, A192: yes
-    telephone_map = {'A191': 'none', 'A192': 'yes, registered under the customers name'}
-    df['telephone'] = df['telephone'].map(telephone_map)
-
-    # A201: yes, A202: no
-    foreign_worker_map = {'A201': 'yes', 'A202': 'no'}
-    df['foreign_worker'] = df['foreign_worker'].map(foreign_worker_map)
-
-    # The original dataset uses 1 for Good and 2 for Bad. We map to 0 and 1.
-    df['risk'] = df['risk'].map({1: 0, 2: 1})
-
-    return df
-
-def feature_engineering(df):
-    """Engineers new features for the analysis."""
-    # Create age groups
-    age_bins = [0, 25, 60, 100]
-    age_labels = ['Young', 'Adult', 'Senior']
-    df['age_group'] = pd.cut(df['age_in_years'], bins=age_bins, labels=age_labels, right=False)
-
-    # Calculate a 'payment pressure' metric. Add epsilon to avoid division by zero.
-    df['payment_pressure'] = df['credit_amount'] / (df['duration_in_month'] + 1e-6)
-
-    return df
+    return {
+        "peer_count": len(peer_group),
+        "default_rate": default_rate,
+        "purpose_counts": purpose_counts
+    }
